@@ -1,6 +1,6 @@
 # Screentime
 
-Measure your screentime and appusage on bspwm. Logs daily.
+Measure your screen time and app usage on bspwm. Logs daily.
 
 
 
