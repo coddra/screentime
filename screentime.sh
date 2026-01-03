@@ -123,7 +123,11 @@ cmd_show() {
   local max_bar_length=30
   if [ "$cols" -ge 120 ]; then max_bar_length=50; fi
 
+  echo "Screen Time on $(basename "$TOTALS_FILE"):"
+
+  local total_secs=0
   sort -nr -k1,1 "$TOTALS_FILE" | while IFS="$(echo -e "\t")" read -r secs name rest; do
+    total_secs=$((total_secs + secs))
     local time="$(format_hms "$secs")"
 
     local bar_length=$(((secs * max_bar_length + max_time / 2) / max_time))
@@ -138,6 +142,7 @@ cmd_show() {
 
     printf "%8s %s %*s %s\n" "$time" "$bar" "$(( max_bar_length - bar_length ))" "" "$name"
   done
+  printf "\nTotal Time: %s\n" "$(format_hms "$total_secs")"
 }
 
 cmd_reset() {
