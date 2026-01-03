@@ -165,13 +165,13 @@ cmd_subscribe() {
 
 cmd_help() {
   cat <<EOF
-Usage:
-  screentime                 Show totals with bars
-  screentime track [label]   Track focus changes; adds elapsed time to previous label
-  screentime reset           Clear totals/state
-Notes:
-  - If [label] is omitted or empty, "idle" is used.
-  - Labels are stored as plain text; tabs/newlines are replaced with spaces.
+Usage: $0 <command> [args]
+Commands:
+  [show]              Show totals with bars
+  track [label]       Track focus changes
+  reset               Clear tracked data
+  subscribe           Continuously track focus changes (for bspwm)
+  help                Show this help message
 EOF
 }
 
