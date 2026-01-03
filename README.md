@@ -34,5 +34,5 @@ Screen time today:
  0:00:03                                                     idle
  0:00:03                                                     Evince
 
-Total time: 0:00:00
+Total time: 0:43:29
 ```

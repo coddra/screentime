@@ -138,9 +138,7 @@ cmd_show() {
 
   echo "Screen time $display_date:"
 
-  local total_secs=0
   sort -nr -k1,1 "$TOTALS_FILE" | while IFS="$(echo -e "\t")" read -r secs name rest; do
-    total_secs=$((total_secs + secs))
     local time="$(format_hms "$secs")"
 
     local bar_length=$(((secs * max_bar_length + max_time / 2) / max_time))
@@ -155,6 +153,8 @@ cmd_show() {
 
     printf "%8s %s %*s %s\n" "$time" "$bar" "$(( max_bar_length - bar_length ))" "" "$name"
   done
+
+  local total_secs=$(awk -F '\t' '{s+=$1} END{print s+0}' "$TOTALS_FILE")
   printf "\nTotal time: %s\n" "$(format_hms "$total_secs")"
 }
 
