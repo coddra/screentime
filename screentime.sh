@@ -18,7 +18,7 @@ format_hms() {
   local h=$((total_secs / 3600))
   local m=$(( (total_secs % 3600) / 60 ))
   local s=$(( total_secs % 60 ))
-  printf "%02d:%02d:%02d" "$h" "$m" "$s"
+  printf "%d:%02d:%02d" "$h" "$m" "$s"
 }
 
 sanitize_label() {
