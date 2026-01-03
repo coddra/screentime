@@ -21,6 +21,16 @@ format_hms() {
   printf "%d:%02d:%02d" "$h" "$m" "$s"
 }
 
+sanitize_date() {
+  local display_date="$1"
+  local date="$(date -d "$display_date" +%Y-%m-%d 2>/dev/null || echo "")"
+  [ -n "$date" ] || {
+    echo "Invalid date: $display_date"
+    exit 1
+  }
+  echo -n "$date"
+}
+
 sanitize_label() {
   echo -n "$1" | tr '\t\r\n' '  '
 }
@@ -109,10 +119,13 @@ cmd_track() {
 }
 
 cmd_show() {
+  local display_date="$1"
+  local date="$(sanitize_date "$display_date")"
   cmd_track "$(get_state | cut -f2)" || true
 
+  TOTALS_FILE="$DATA_DIR/$date"
   if [ ! -f "$TOTALS_FILE" ] || [ ! -s "$TOTALS_FILE" ]; then
-    echo "No data yet. Start tracking with: screentime track <label>"
+    echo "No data $display_date."
     exit 0
   fi
 
@@ -123,7 +136,7 @@ cmd_show() {
   local max_bar_length=30
   if [ "$cols" -ge 120 ]; then max_bar_length=50; fi
 
-  echo "Screen Time on $(basename "$TOTALS_FILE"):"
+  echo "Screen time $display_date:"
 
   local total_secs=0
   sort -nr -k1,1 "$TOTALS_FILE" | while IFS="$(echo -e "\t")" read -r secs name rest; do
@@ -142,13 +155,20 @@ cmd_show() {
 
     printf "%8s %s %*s %s\n" "$time" "$bar" "$(( max_bar_length - bar_length ))" "" "$name"
   done
-  printf "\nTotal Time: %s\n" "$(format_hms "$total_secs")"
+  printf "\nTotal time: %s\n" "$(format_hms "$total_secs")"
 }
 
-cmd_reset() {
-  : > "$TOTALS_FILE" 2>/dev/null || true
-  : > "$STATE_FILE" 2>/dev/null || true
-  echo "Reset complete."
+cmd_clear() {
+  local display_date="$1"
+  local date="$(sanitize_date "$display_date")"
+
+  if [ "$date" = "$(basename "$TOTALS_FILE")" ]; then
+    rm -rf "$STATE_FILE"
+  fi
+
+  TOTALS_FILE="$DATA_DIR/$date"
+  rm -rf "$TOTALS_FILE"
+  echo "Cleared data: $display_date."
 }
 
 cmd_subscribe() {
@@ -167,20 +187,26 @@ cmd_help() {
   cat <<EOF
 Usage: $0 <command> [args]
 Commands:
-  [show]              Show totals with bars
-  track [label]       Track focus changes
-  reset               Clear tracked data
-  subscribe           Continuously track focus changes (for bspwm)
-  help                Show this help message
+  [show | show [date]]          Show totals with bars
+  track [label]                 Track focus changes
+  clear [date]                  Clear tracked data
+  subscribe                     Continuously track focus changes (for bspwm)
+  help                          Show this help message
+Arguments:
+  date                          Date in any format recognized by 'date -d'
+                                e.g. "today", "yesterday", "last monday",
+                                     "2026-01-03", "01/03/2026", etc.
+  label                         Label for the tracked time. 'subscribe' uses
+                                the window class of the focused window.
 EOF
 }
 
 cmd="${1:-show}"
 case "$cmd" in
   track) cmd_track "${2:-idle}" ;;
-  reset) cmd_reset ;;
+  clear) cmd_clear "${2:-today}" ;;
   help|-h|--help) cmd_help ;;
-  show) cmd_show "${2:-}" ;;
+  show) cmd_show "${2:-today}" ;;
   subscribe) cmd_subscribe ;;
   *) cmd_help; exit 2 ;;
 esac

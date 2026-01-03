@@ -28,11 +28,11 @@ screentime.sh help
 ## Example
 
 ```sh
-Screen Time on 2026-01-03:
+Screen time today:
  0:41:40 ██████████████████████████████████████████████████  ranger
  0:01:43 ██                                                  qutebrowser
  0:00:03                                                     idle
  0:00:03                                                     Evince
 
-Total Time: 0:00:00
+Total time: 0:00:00
 ```
