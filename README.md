@@ -8,7 +8,12 @@ Measure your screen time and app usage on bspwm. Logs daily.
 
 Start daemon:
 ```sh
-screentime.sh subscribe
+screentime.sh subscribe bspwm &
+```
+
+Subscribe to systemd hooks:
+```sh
+screentime.sh subscribe systemd
 ```
 
 Print today's app usage:
@@ -29,10 +34,11 @@ screentime.sh help
 
 ```sh
 Screen time today:
- 0:41:40 ██████████████████████████████████████████████████  ranger
- 0:01:43 ██                                                  qutebrowser
- 0:00:03                                                     idle
- 0:00:03                                                     Evince
+ 0:51:11 ██████████████████████████████  qutebrowser
+ 0:40:13 ████████████████████████        Code
+ 0:13:18 ████████                        ranger
+ 0:12:49 ████████                        Alacritty
+ 0:00:35                                 idle
 
-Total time: 0:43:29
+Total time: 1:58:06
 ```
