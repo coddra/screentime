@@ -1,13 +1,11 @@
-#!/bin/sh
-set -eu
+#!/bin/env bash
 
+SELF="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )/$(basename "$0")"
+TODAY="$(date +%Y-%m-%d)"
 APPNAME="screentime"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/$APPNAME"
 STATE_FILE="$DATA_DIR/state"
-TOTALS_FILE="$DATA_DIR/$(date +%Y-%m-%d)"
-
-mkdir -p "$DATA_DIR"
-: > /dev/null 2>&1 || true
+TOTALS_FILE="$DATA_DIR/$TODAY"
 
 now_epoch() {
   date +%s
@@ -15,7 +13,7 @@ now_epoch() {
 
 format_hms() {
   local total_secs="$1"
-  local h=$((total_secs / 3600))
+  local h=$(( total_secs / 3600 ))
   local m=$(( (total_secs % 3600) / 60 ))
   local s=$(( total_secs % 60 ))
   printf "%d:%02d:%02d" "$h" "$m" "$s"
@@ -25,7 +23,7 @@ sanitize_date() {
   local display_date="$1"
   local date="$(date -d "$display_date" +%Y-%m-%d 2>/dev/null || echo "")"
   [ -n "$date" ] || {
-    echo "Invalid date: $display_date"
+    echo "Invalid date: $display_date" >&2
     exit 1
   }
   echo -n "$date"
@@ -35,15 +33,32 @@ sanitize_label() {
   echo -n "$1" | tr '\t\r\n' '  '
 }
 
+systemd_hooks_dir() {
+  local dirs=(
+    "/etc/systemd/system-sleep"
+    "/usr/lib/systemd/system-sleep"
+    "/lib/systemd/system-sleep"
+  )
+  for dir in "${dirs[@]}"; do
+    if [ -d "$dir" ]; then
+      echo -n "$dir"
+      return
+    fi
+  done
+}
+
 get_state() {
   if [ -f "$STATE_FILE" ]; then
     cat "$STATE_FILE"
   else
-    echo -n ""
+    echo -en "$(now_epoch)\t"
   fi
 }
 
 set_state() {
+  if [ -z "$2" ] && [ ! -f "$STATE_FILE" ]; then
+    return
+  fi
   echo -en "$1\t$2" > "$STATE_FILE"
 }
 
@@ -54,6 +69,13 @@ add_total_seconds() {
   [ "$add" -gt 0 ] || return 0
 
   if [ ! -f "$TOTALS_FILE" ]; then
+    if [ -z "$label" ]; then
+      local yesterday="$(date -d yesterday +%Y-%m-%d)"
+      if [ "$(basename "$TOTALS_FILE")" != "$TODAY" ] || [ ! -f "$DATA_DIR/$yesterday" ]; then
+        return
+      fi
+      TOTALS_FILE="$DATA_DIR/$yesterday"
+    fi
     : > "$TOTALS_FILE"
   fi
 
@@ -73,7 +95,8 @@ add_total_seconds() {
     }
   ' "$TOTALS_FILE" > "$tmp"
 
-  mv "$tmp" "$TOTALS_FILE"
+  cat "$tmp" > "$TOTALS_FILE"
+  rm -f "$tmp"
 }
 
 focused_window_id() {
@@ -90,43 +113,40 @@ window_class() {
   echo "unknown"
 }
 
+track_focused() {
+  local wid="$(focused_window_id)"
+  local class="$(window_class "$wid")"
+  cmd_track "$class"
+}
+
 cmd_track() {
   local label="$(sanitize_label "$1")"
 
   local now="$(now_epoch)"
 
   local state="$(get_state)"
-  if [ -z "$state" ]; then
-    set_state "$now" "$label"
-    exit 0
-  fi
+  set_state "$now" "$label"
 
   local prev_ts="$(echo -n "$state" | cut -f1)"
   local prev_label="$(echo -n "$state" | cut -f2)"
-
-  case "$prev_ts" in
-    ''|*[!0-9]*)
-      set_state "$now" "$label"
-      exit 0
-      ;;
-  esac
+  [ -n "$prev_label" ] || return
 
   local elapsed=$((now - prev_ts))
-  [ "$elapsed" -ge 0 ] || elapsed=0
 
   add_total_seconds "$elapsed" "$prev_label"
-  set_state "$now" "$label"
 }
 
 cmd_show() {
   local display_date="$1"
   local date="$(sanitize_date "$display_date")"
-  cmd_track "$(get_state | cut -f2)" || true
+  if [ "$date" = "$TODAY" ]; then
+    cmd_track "$(get_state | cut -f2)" || true
+  fi
 
   TOTALS_FILE="$DATA_DIR/$date"
   if [ ! -f "$TOTALS_FILE" ] || [ ! -s "$TOTALS_FILE" ]; then
     echo "No data $display_date."
-    exit 0
+    return
   fi
 
   local max_time=$(cut -f1 "$TOTALS_FILE" | sort -nr | head -n1)
@@ -134,7 +154,7 @@ cmd_show() {
 
   local cols="${COLUMNS:-80}"
   local max_bar_length=30
-  if [ "$cols" -ge 120 ]; then max_bar_length=50; fi
+  [ "$cols" -ge 120 ] && max_bar_length=50
 
   echo "Screen time $display_date:"
 
@@ -162,7 +182,7 @@ cmd_clear() {
   local display_date="$1"
   local date="$(sanitize_date "$display_date")"
 
-  if [ "$date" = "$(basename "$TOTALS_FILE")" ]; then
+  if [ "$date" = "$TODAY" ]; then
     rm -rf "$STATE_FILE"
   fi
 
@@ -172,25 +192,64 @@ cmd_clear() {
 }
 
 cmd_subscribe() {
-  local wid="$(focused_window_id)"
-  local class="$(window_class "$wid")"
-  cmd_track "$class"
+  local target="$1"
+  track_focused
 
-  bspc subscribe node_focus desktop_focus node_add node_remove | while IFS= read -r _; do
-    wid="$(focused_window_id)"
-    class="$(window_class "$wid")"
-    cmd_track "$class"
-  done
+  case "$target" in
+    bspwm)
+      echo "Listening for focus changes (bspwm)..."
+      bspc subscribe node_focus desktop_focus node_add node_remove | while IFS= read -r _; do
+        track_focused
+      done
+      ;;
+    systemd)
+      local systemd_dir="$(systemd_hooks_dir)"
+      [ -n "$systemd_dir" ] || {
+        echo "Systemd hooks directory not found." >&2
+        exit 1
+      }
+      echo "Installing systemd suspend/resume hooks in: $systemd_dir"
+      cat <<EOF | sudo tee "$systemd_dir/screentime" > /dev/null
+#!/bin/sh
+case "\$1" in
+  pre) "$SELF" event suspend --dir "$DATA_DIR";;
+  post) "$SELF" event resume --dir "$DATA_DIR";;
+esac
+EOF
+      sudo chmod a+rx "$systemd_dir/screentime"
+      ;;
+    *)
+      echo "Unsupported target: $target" >&2
+      exit 1
+      ;;
+  esac
+}
+
+cmd_event() {
+  local event="$1"
+  case "$event" in
+      suspend)
+        cmd_track ""
+        ;;
+      resume)
+        track_focused
+        ;;
+      *)
+        echo "Unrecognized event: $event" >&2
+        exit 1
+        ;;
+    esac
 }
 
 cmd_help() {
   cat <<EOF
-Usage: $0 <command> [args]
+Usage: $0 <command> [args] [options]
 Commands:
-  [show | show [date]]          Show totals with bars
+  [show] [date]                 Show totals with bars
   track [label]                 Track focus changes
   clear [date]                  Clear tracked data
   subscribe                     Continuously track focus changes (for bspwm)
+  event <suspend|resume>        Track system events
   help                          Show this help message
 Arguments:
   date                          Date in any format recognized by 'date -d'
@@ -198,15 +257,67 @@ Arguments:
                                      "2026-01-03", "01/03/2026", etc.
   label                         Label for the tracked time. 'subscribe' uses
                                 the window class of the focused window.
+Options:
+  --dir <path>                  Data directory (default: $DATA_DIR)
 EOF
 }
 
 cmd="${1:-show}"
+if [ -n "$1" ]; then
+  shift
+fi
+
+arg=""
 case "$cmd" in
-  track) cmd_track "${2:-idle}" ;;
-  clear) cmd_clear "${2:-today}" ;;
-  help|-h|--help) cmd_help ;;
-  show) cmd_show "${2:-today}" ;;
-  subscribe) cmd_subscribe ;;
+  track)
+    arg="${1:-idle}" ;;
+  show|clear)
+    arg="${1:-today}" ;;
+  subscribe)
+    arg="${1:-bspwm}" ;;
+  event)
+    arg="$1"
+    [ -n "$arg" ] || {
+      echo "Missing <suspend|resume> after 'event' command" >&2
+      exit 1
+    }
+    ;;
+  help) ;;
   *) cmd_help; exit 2 ;;
+esac
+if [ -n "$1" ]; then
+  shift
+fi
+
+while [ -n "$1" ]; do
+  case "$1" in
+    -h|--help) cmd_help; exit 0 ;;
+    --dir)
+      if [ -z "${2:-}" ]; then
+        echo "Missing directory path after --dir" >&2
+        exit 1
+      fi
+      DATA_DIR="$2"
+      TOTALS_FILE="$DATA_DIR/$TODAY"
+      STATE_FILE="$DATA_DIR/state"
+      shift
+      ;;
+    *)
+      echo "Unrecognized option: $1" >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+mkdir -p "$DATA_DIR"
+: > /dev/null 2>&1 || true
+
+case "$cmd" in
+  track) cmd_track "$arg" ;;
+  show) cmd_show "$arg" ;;
+  clear) cmd_clear "$arg" ;;
+  subscribe) cmd_subscribe "$arg" ;;
+  event) cmd_event "$arg" ;;
+  help) cmd_help ;;
 esac
