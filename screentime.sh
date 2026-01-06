@@ -6,6 +6,7 @@ APPNAME="screentime"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/$APPNAME"
 STATE_FILE="$DATA_DIR/state"
 TOTALS_FILE="$DATA_DIR/$TODAY"
+PRIV_CMD="${PRIV_CMD:-sudo}"
 
 now_epoch() {
   date +%s
@@ -36,12 +37,12 @@ sanitize_label() {
 systemd_hooks_dir() {
   local dirs=(
     "/etc/systemd/system-sleep"
-    "/usr/lib/systemd/system-sleep"
     "/lib/systemd/system-sleep"
+    "/usr/lib/systemd/system-sleep"
   )
   for dir in "${dirs[@]}"; do
     if [ -d "$dir" ]; then
-      echo -n "$dir"
+      echo -n "$(dirname "$dir")"
       return
     fi
   done
@@ -208,15 +209,26 @@ cmd_subscribe() {
         echo "Systemd hooks directory not found." >&2
         exit 1
       }
-      echo "Installing systemd suspend/resume hooks in: $systemd_dir"
-      cat <<EOF | sudo tee "$systemd_dir/screentime" > /dev/null
+
+      local sleep_path="$systemd_dir/system-sleep/$APPNAME"
+      local shutdown_path="$systemd_dir/system-shutdown/$APPNAME"
+
+      echo "Installing systemd suspend/resume hooks: $sleep_path"
+      cat <<EOF | "$PRIV_CMD" tee "$sleep_path" > /dev/null
 #!/bin/sh
 case "\$1" in
   pre) "$SELF" event suspend --dir "$DATA_DIR";;
   post) "$SELF" event resume --dir "$DATA_DIR";;
 esac
 EOF
-      sudo chmod a+rx "$systemd_dir/screentime"
+      "$PRIV_CMD" chmod a+rx "$sleep_path"
+
+      echo "Installing systemd shutdown hook: $shutdown_path"
+      cat <<EOF | "$PRIV_CMD" tee "$shutdown_path" > /dev/null
+#!/bin/sh
+"$SELF" event shutdown --dir "$DATA_DIR"
+EOF
+      "$PRIV_CMD" chmod a+rx "$shutdown_path"
       ;;
     *)
       echo "Unsupported target: $target" >&2
@@ -228,7 +240,7 @@ EOF
 cmd_event() {
   local event="$1"
   case "$event" in
-      suspend)
+      suspend|shutdown)
         cmd_track ""
         ;;
       resume)
@@ -249,7 +261,7 @@ Commands:
   track [label]                 Track focus changes
   clear [date]                  Clear tracked data
   subscribe                     Continuously track focus changes (for bspwm)
-  event <suspend|resume>        Track system events
+  event <event>                 Track system events
   help                          Show this help message
 Arguments:
   date                          Date in any format recognized by 'date -d'
@@ -257,8 +269,10 @@ Arguments:
                                      "2026-01-03", "01/03/2026", etc.
   label                         Label for the tracked time. 'subscribe' uses
                                 the window class of the focused window.
+  event                         System event: suspend, resume, shutdown
 Options:
   --dir <path>                  Data directory (default: $DATA_DIR)
+  --privilege-command <cmd>     Command to use for privileged operations (default: sudo)
 EOF
 }
 
@@ -300,6 +314,14 @@ while [ -n "$1" ]; do
       DATA_DIR="$2"
       TOTALS_FILE="$DATA_DIR/$TODAY"
       STATE_FILE="$DATA_DIR/state"
+      shift
+      ;;
+    --privilege-command)
+      if [ -z "${2:-}" ]; then
+        echo "Missing command after --privilege-command" >&2
+        exit 1
+      fi
+      PRIV_CMD="$2"
       shift
       ;;
     *)
