@@ -8,6 +8,9 @@ STATE_FILE="$DATA_DIR/state"
 TOTALS_FILE="$DATA_DIR/$TODAY"
 PRIV_CMD="${PRIV_CMD:-sudo}"
 
+MAX_BAR="████████████████████████████████████████████████████████████████"
+MAX_WS="                                                                "
+
 now_epoch() {
   date +%s
 }
@@ -165,14 +168,8 @@ cmd_show() {
     local bar_length=$(((secs * max_bar_length + max_time / 2) / max_time))
     [ "$bar_length" -gt "$max_bar_length" ] && bar_length="$max_bar_length"
 
-    local i=0
-    local bar=""
-    while [ "$i" -lt "$bar_length" ]; do
-      bar="${bar}█"
-      i=$((i + 1))
-    done
-
-    printf "%8s %s %*s %s\n" "$time" "$bar" "$(( max_bar_length - bar_length ))" "" "$name"
+    [ "${#time}" -lt 8 ] && time=" ${time}"
+    echo "$time ${MAX_BAR:0:bar_length} ${MAX_WS:0:$(( max_bar_length - bar_length ))} $name"
   done
 
   local total_secs=$(awk -F '\t' '{s+=$1} END{print s+0}' "$TOTALS_FILE")
